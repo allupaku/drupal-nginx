@@ -120,8 +120,29 @@ server {
             return 404;
         }
 
-        try_files $uri @drupal;
+        try_files $uri {{ getenv "NGINX_DRUPAL_BOOST_CACHE_ENABLE" "@cache" }} @drupal;
     }
+{{ if getenv "NGINX_DRUPAL_BOOST_CACHE_ENABLE" }}
+    location {{ getenv "NGINX_DRUPAL_BOOST_CACHE_ENABLE" "@cache" }} {
+
+        if ($query_string ~ ".+") {
+        return 405;
+        }
+        if ($http_cookie ~ "DRUPAL_UID" ) {
+        return 405;
+        }
+        if ($request_method !~ ^(GET|HEAD)$ ) {
+        return 405;
+        }
+        error_page 405 = @drupal;
+
+        add_header Expires "Tue, 22 Sep 1974 08:00:00 GMT";
+        add_header Cache-Control "must-revalidate, post-check=0, pre-check=0";
+
+        try_files {{ getenv "NGINX_DRUPAL_BOOST_CACHE_TRY_FILES" '/cache/normal/$host/${uri}_.html /cache/perm/$host/${uri}_.css /cache/perm/$host/${uri}_.js /cache/$host/0$uri.html /cache/$host/0${uri}/index.html @drupal;' }};
+
+    }
+{{ end }}
 
 {{ if getenv "NGINX_DRUPAL_FILE_PROXY_URL" }}
     location @file_proxy {
