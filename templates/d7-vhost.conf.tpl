@@ -8,6 +8,9 @@ map $http_x_forwarded_proto $fastcgi_https {
     https on;
 }
 
+    fastcgi_cache_path /var/www/html/nginxcache keys_zone=islman:1024m inactive=7200m;
+    fastcgi_cache_key "$scheme$request_method$host$request_uri";
+
 server {
     server_name {{ getenv "NGINX_SERVER_NAME" "drupal" }};
     listen 80 default_server{{ if getenv "NGINX_HTTP2" }} http2{{ end }};
@@ -40,6 +43,27 @@ server {
 
         location ~* /sites/.+/files/private/ {
             internal;
+        }
+
+        location ~* /islandora/object/.+/datastream/.+/view {
+
+
+            fastcgi_connect_timeout 10s;
+            fastcgi_cache_lock on;
+            fastcgi_cache_use_stale error timeout invalid_header updating http_500;
+            fastcgi_cache_valid 7200m;
+            fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
+            fastcgi_cache islman;
+
+            add_header X-Cache-Status $upstream_cache_status;
+
+            include fastcgi.conf;
+            fastcgi_param QUERY_STRING $query_string;
+            fastcgi_param SCRIPT_NAME /index.php;
+            fastcgi_param SCRIPT_FILENAME $document_root/index.php;
+            fastcgi_pass php;
+
+
         }
 
         location ~* /files/styles/ {
@@ -119,30 +143,18 @@ server {
         location ~* ^(?:.+\.(?:htaccess|make|txt|engine|inc|info|install|module|profile|po|pot|sh|.*sql|test|theme|tpl(?:\.php)?|xtmpl)|code-style\.pl|/Entries.*|/Repository|/Root|/Tag|/Template)$ {
             return 404;
         }
-
-        try_files $uri {{ getenv "NGINX_DRUPAL_BOOST_CACHE_ENABLE" "@cache" }} @drupal;
-    }
 {{ if getenv "NGINX_DRUPAL_BOOST_CACHE_ENABLE" }}
-    location {{ getenv "NGINX_DRUPAL_BOOST_CACHE_ENABLE" "@cache" }} {
+        try_files @cache $uri @drupal;
+{{ else }}
+        try_files $uri @drupal;
+{{ end }}
+    }
 
-        if ($query_string ~ ".+") {
-        return 405;
-        }
-        if ($http_cookie ~ "DRUPAL_UID" ) {
-        return 405;
-        }
-        if ($request_method !~ ^(GET|HEAD)$ ) {
-        return 405;
-        }
-        error_page 405 = @drupal;
-
+    location @cache {
         add_header Expires "Tue, 22 Sep 1974 08:00:00 GMT";
         add_header Cache-Control "must-revalidate, post-check=0, pre-check=0";
-
-        try_files {{ getenv "NGINX_DRUPAL_BOOST_CACHE_TRY_FILES" '/cache/normal/$host/${uri}_.html /cache/perm/$host/${uri}_.css /cache/perm/$host/${uri}_.js /cache/$host/0$uri.html /cache/$host/0${uri}/index.html @drupal;' }};
-
+        try_files /cache/normal/islgman.qnl.qa/${uri}_${query_string}.html /cache/normal/islgman.qnl.qa/${uri}_.html  @drupal;
     }
-{{ end }}
 
 {{ if getenv "NGINX_DRUPAL_FILE_PROXY_URL" }}
     location @file_proxy {
@@ -151,12 +163,32 @@ server {
 {{ end }}
 
     location @drupal {
+
+
+
+        if ($request_method !~ ^(GET|HEAD)$ ) {
+        return 405;
+        }
+        error_page 405 = @drupalback;
+
+        add_header X-Custom-Uri $uri;
+        add_header X-Custom-Qry $query_string;
+        add_header X-Cache-Status $upstream_cache_status;
+
+        try_files /cache/normal/islgman.qnl.qa/${uri}_${query_string}.html  @drupalback;
+
+    }
+
+    location @drupalback{
+
         include fastcgi.conf;
+        fastcgi_connect_timeout 10s;
         fastcgi_param QUERY_STRING $query_string;
         fastcgi_param SCRIPT_NAME /index.php;
         fastcgi_param SCRIPT_FILENAME $document_root/index.php;
         fastcgi_pass php;
         track_uploads {{ getenv "NGINX_DRUPAL_TRACK_UPLOADS" "uploads 60s" }};
+
     }
 
     location @drupal-no-args {
